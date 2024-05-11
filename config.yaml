@@ -1,0 +1,7 @@
+DB:
+    Host: "localhost"
+    Port: 6444
+    Username: "username"
+    Name: "account"
+    Password: "password"
+    SSLMode: "disable"
