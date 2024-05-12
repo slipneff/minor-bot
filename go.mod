@@ -34,6 +34,7 @@ require (
 
 require (
 	github.com/avito-tech/go-transaction-manager v1.5.0
+	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/spf13/viper v1.18.2
 	github.com/technoweenie/multipartstreamer v1.0.1 // indirect
 	gorm.io/driver/sqlite v1.5.5

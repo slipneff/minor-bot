@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	trmgorm "github.com/avito-tech/go-transaction-manager/gorm"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/slipneff/minor-bot/config"
 	"github.com/slipneff/minor-bot/constants"
 	"github.com/slipneff/minor-bot/models"
@@ -28,6 +28,7 @@ const (
 	SceneAskGeo
 	SceneAskDifferentGeo
 	SceneAskCategory
+	SceneAskDescription
 	SceneAskUniversity
 	SceneAskJob
 	SceneAskDifferentUniversity
@@ -36,6 +37,9 @@ const (
 	SceneApproveInterviewRespondent
 	SceneApproveInterviewCustomer
 	SceneRateRespondent
+	SceneAskTime
+	SceneMenu
+	SceneAskResults
 )
 
 type UserSession struct {
@@ -61,15 +65,48 @@ func main() {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
-	updates, err := bot.GetUpdatesChan(u)
-
-	if err != nil {
-		log.Panic(err)
-	}
+	updates := bot.GetUpdatesChan(u)
+	cmdCfg := tgbotapi.NewSetMyCommands(
+		tgbotapi.BotCommand{
+			Command:     "restart",
+			Description: "Сброс",
+		},
+		tgbotapi.BotCommand{
+			Command:     "start",
+			Description: "Старт",
+		},
+		tgbotapi.BotCommand{
+			Command:     "menu",
+			Description: "Главное меню",
+		},
+	)
+	bot.Send(cmdCfg)
 	sessions = make(map[int64]*UserSession)
 
 	for update := range updates {
-
+		if update.CallbackQuery != nil {
+			switch update.CallbackQuery.Data {
+			case "balance":
+				balance, err := sql.GetBalanceUser(ctx, update.CallbackQuery.Message.Chat.ID)
+				if err != nil {
+					msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при получении баланса. Попробуйте позже.")
+					bot.Send(msg)
+					continue
+				}
+				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Ваш баланс: %d", balance))
+				bot.Send(msg)
+			case "profile_customer":
+				s, err := sql.GetCustomerByUserId(ctx, update.CallbackQuery.Message.Chat.ID)
+				if err != nil {
+					msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при получении профиля. Попробуйте позже.")
+					bot.Send(msg)
+					continue
+				}
+				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Ваш профиль:\n\n%s", s.ToString()))
+				msg.ParseMode = "markdown"
+				bot.Send(msg)
+			}
+		}
 		if update.Message == nil { // ignore any non-Message Updates
 			continue
 		}
@@ -82,11 +119,11 @@ func main() {
 		}
 
 		session := sessions[userID]
+
 		if update.Message.IsCommand() {
 			switch update.Message.Command() {
 			case "start":
 				msg := tgbotapi.NewMessage(userID, constants.Hello)
-				msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 					tgbotapi.NewKeyboardButtonRow(
 						tgbotapi.NewKeyboardButton("Я хочу проводить интервью"),
@@ -97,6 +134,32 @@ func main() {
 				session.CurrentScene = SceneAskSide
 			case "help":
 				msg := tgbotapi.NewMessage(userID, constants.Hello)
+				bot.Send(msg)
+			case "restart":
+				sql.ResetAll(ctx, userID)
+				msg := tgbotapi.NewMessage(userID, "---Настройки сброшены---\n"+constants.Hello)
+				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+					tgbotapi.NewKeyboardButtonRow(
+						tgbotapi.NewKeyboardButton("Я хочу проводить интервью"),
+						tgbotapi.NewKeyboardButton("Я хочу отвечать на интервью"),
+					),
+				)
+				bot.Send(msg)
+				session.CurrentScene = SceneAskSide
+			case "menu":
+				session.CurrentScene = SceneMenu
+				msg := tgbotapi.NewMessage(userID, "Меню")
+				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("Мои респонденты", "my_respondents"),
+						tgbotapi.NewInlineKeyboardButtonData("Профиль заказчика", "profile_customer"),
+						tgbotapi.NewInlineKeyboardButtonData("Профиль респондента", "profile_respondent"),
+					),
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("Баланс", "balance"),
+						tgbotapi.NewInlineKeyboardButtonData("Доска исследователя", "dashboard"),
+					),
+				)
 				bot.Send(msg)
 			case "ready_to_answer":
 				err := sql.UpdateRespondentByUserId(ctx, models.Respondent{
@@ -288,26 +351,26 @@ func main() {
 				session.User.Respondent.Name = update.Message.Text
 			}
 			msg := tgbotapi.NewMessage(userID, message)
-			msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+				tgbotapi.NewKeyboardButtonRow(
+					tgbotapi.NewKeyboardButton("Неважно"),
+				),
+			)
 			bot.Send(msg)
 			session.CurrentScene = SceneAskAge
 		case SceneAskAge:
-			age, err := strconv.Atoi(update.Message.Text)
-			if err != nil {
-				bot.Send(tgbotapi.NewMessage(userID, "Введите корректный возраст"))
-				continue
-			}
+
 			if session.User.IsCustomer == 1 {
 				err = sql.UpdateCustomerByUserId(ctx, models.Customer{
 					UserId: userID,
-					Age:    int32(age),
+					Age:    update.Message.Text,
 				})
 				if err != nil {
 					bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
 					continue
 				}
 			} else {
-				session.User.Respondent.Age = int32(age)
+				session.User.Respondent.Age = update.Message.Text
 			}
 			msg := tgbotapi.NewMessage(userID, "Отлично, теперь выберете пол")
 			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
@@ -348,7 +411,7 @@ func main() {
 					tgbotapi.NewKeyboardButton("Екатеринбург"),
 					tgbotapi.NewKeyboardButton("Санкт-Петербург"),
 					tgbotapi.NewKeyboardButton("Москва и МО"),
-				),tgbotapi.NewKeyboardButtonRow(
+				), tgbotapi.NewKeyboardButtonRow(
 					tgbotapi.NewKeyboardButton("Казань"),
 					tgbotapi.NewKeyboardButton("Город неважен"),
 					tgbotapi.NewKeyboardButton("Другое"),
@@ -364,7 +427,7 @@ func main() {
 						tgbotapi.NewKeyboardButton("Екатеринбург"),
 						tgbotapi.NewKeyboardButton("Санкт-Петербург"),
 						tgbotapi.NewKeyboardButton("Москва и МО"),
-					),tgbotapi.NewKeyboardButtonRow(
+					), tgbotapi.NewKeyboardButtonRow(
 						tgbotapi.NewKeyboardButton("Казань"),
 						tgbotapi.NewKeyboardButton("Город неважен"),
 						tgbotapi.NewKeyboardButton("Другое"),
@@ -460,62 +523,164 @@ func main() {
 			}
 			if update.Message.Text == "Студент" {
 				msg := tgbotapi.NewMessage(userID, "Факультет респондента?")
-				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
-					tgbotapi.NewKeyboardButtonRow(
-						tgbotapi.NewKeyboardButton("Экономика"),
-						tgbotapi.NewKeyboardButton("Психология"),
-						tgbotapi.NewKeyboardButton("Маркетинг"),
-					),
-					tgbotapi.NewKeyboardButtonRow(
-						tgbotapi.NewKeyboardButton("Юриспруденция"),
-						tgbotapi.NewKeyboardButton("Другое"),
-					),
-				)
+				if session.User.IsCustomer == 1 {
+					msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Экономика"),
+							tgbotapi.NewKeyboardButton("Психология"),
+							tgbotapi.NewKeyboardButton("Маркетинг"),
+						),
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Юриспруденция"),
+							tgbotapi.NewKeyboardButton("Другое"),
+							tgbotapi.NewKeyboardButton("Неважно"),
+						),
+					)
+				} else {
+					if session.User.IsCustomer == 1 {
+						msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+							tgbotapi.NewKeyboardButtonRow(
+								tgbotapi.NewKeyboardButton("Экономика"),
+								tgbotapi.NewKeyboardButton("Психология"),
+								tgbotapi.NewKeyboardButton("Маркетинг"),
+							),
+							tgbotapi.NewKeyboardButtonRow(
+								tgbotapi.NewKeyboardButton("Юриспруденция"),
+								tgbotapi.NewKeyboardButton("Другое"),
+							),
+						)
+					}
+				}
 				bot.Send(msg)
 				session.CurrentScene = SceneAskUniversity
 				continue
 			}
 			if update.Message.Text == "Работник компании" {
 				msg := tgbotapi.NewMessage(userID, "Cфера респондента?")
-				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
-					tgbotapi.NewKeyboardButtonRow(
-						tgbotapi.NewKeyboardButton("Бизнес"),
-						tgbotapi.NewKeyboardButton("Медицина"),
-						tgbotapi.NewKeyboardButton("IT"),
-						
-					),
-					tgbotapi.NewKeyboardButtonRow(
-						tgbotapi.NewKeyboardButton("Строительство"),
-						tgbotapi.NewKeyboardButton("Другое"),
-					),
-				)
+				if session.User.IsCustomer == 1 {
+					msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Бизнес"),
+							tgbotapi.NewKeyboardButton("Медицина"),
+							tgbotapi.NewKeyboardButton("IT"),
+						),
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Строительство"),
+							tgbotapi.NewKeyboardButton("Другое"),
+							tgbotapi.NewKeyboardButton("Неважно"),
+						),
+					)
+				} else {
+					msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Бизнес"),
+							tgbotapi.NewKeyboardButton("Медицина"),
+							tgbotapi.NewKeyboardButton("IT"),
+						),
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Строительство"),
+							tgbotapi.NewKeyboardButton("Другое"),
+						),
+					)
+				}
+
 				bot.Send(msg)
 				session.CurrentScene = SceneAskJob
 				continue
 			}
-			msg := tgbotapi.NewMessage(userID, "Готовы сделать интервью?")
+			if session.User.IsCustomer == 1 {
+				msg := tgbotapi.NewMessage(userID, "Укажите продолжительность интервью")
+				msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+				bot.Send(msg)
+				session.CurrentScene = SceneAskTime
+			}
+			msg := tgbotapi.NewMessage(userID, "Готовы пройти интервью?")
 			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 				tgbotapi.NewKeyboardButtonRow(
-					tgbotapi.NewKeyboardButton("Готов к интервью"),
-					tgbotapi.NewKeyboardButton("Не готов"),
+					tgbotapi.NewKeyboardButton("Да, вывесить на доску заказов"),
+					tgbotapi.NewKeyboardButton("Редактировать"),
 				),
 			)
 			bot.Send(msg)
 			session.CurrentScene = SceneAskIsReady
+		case SceneAskTime:
+			if update.Message.Text == "" {
+				msg := tgbotapi.NewMessage(userID, "Введите продолжительность интервью")
+				msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+				bot.Send(msg)
+				continue
+			}
+			err = sql.UpdateCustomerByUserId(ctx, models.Customer{
+				UserId: userID,
+				Time:   update.Message.Text,
+			})
+			if err != nil {
+				bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
+				continue
+			}
+			session.CurrentScene = SceneAskResults
+			msg := tgbotapi.NewMessage(userID, "Готовы ли вы поделиться результатами своего исследования?")
+			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+				tgbotapi.NewKeyboardButtonRow(
+					tgbotapi.NewKeyboardButton("Да"),
+					tgbotapi.NewKeyboardButton("Нет"),
+				),
+			)
+			bot.Send(msg)
+		case SceneAskResults:
+			if update.Message.Text == "" || update.Message.Text != "Нет" && update.Message.Text != "Да" {
+				msg := tgbotapi.NewMessage(userID, "Готовы ли вы поделиться результатами своего исследования?")
+				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+					tgbotapi.NewKeyboardButtonRow(
+						tgbotapi.NewKeyboardButton("Да"),
+						tgbotapi.NewKeyboardButton("Нет"),
+					),
+				)
+				bot.Send(msg)
+				continue
+			}
+			err = sql.UpdateCustomerByUserId(ctx, models.Customer{
+				UserId:  userID,
+				Results: update.Message.Text,
+			})
+			if err != nil {
+				bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
+				continue
+			}
+			session.CurrentScene = SceneAskResults
+			msg := tgbotapi.NewMessage(userID, "Комментарий")
+			bot.Send(msg)
 		case SceneAskUniversity:
 			if update.Message.Text != "Экономика" && update.Message.Text != "Психология" && update.Message.Text != "Маркетинг" && update.Message.Text != "Юриспруденция" && update.Message.Text != "Другое" {
 				msg := tgbotapi.NewMessage(userID, "Выберите корректный факультет")
-				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
-					tgbotapi.NewKeyboardButtonRow(
-						tgbotapi.NewKeyboardButton("Экономика"),
-						tgbotapi.NewKeyboardButton("Психология"),
-						tgbotapi.NewKeyboardButton("Маркетинг"),
-					),
-					tgbotapi.NewKeyboardButtonRow(
-						tgbotapi.NewKeyboardButton("Юриспруденция"),
-						tgbotapi.NewKeyboardButton("Другое"),
-					),
-				)
+				if session.User.IsCustomer == 1 {
+					msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Экономика"),
+							tgbotapi.NewKeyboardButton("Психология"),
+							tgbotapi.NewKeyboardButton("Маркетинг"),
+						),
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Юриспруденция"),
+							tgbotapi.NewKeyboardButton("Другое"),
+							tgbotapi.NewKeyboardButton("Неважно"),
+						),
+					)
+				} else {
+					if session.User.IsCustomer == 1 {
+						msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+							tgbotapi.NewKeyboardButtonRow(
+								tgbotapi.NewKeyboardButton("Экономика"),
+								tgbotapi.NewKeyboardButton("Психология"),
+								tgbotapi.NewKeyboardButton("Маркетинг"),
+							),
+							tgbotapi.NewKeyboardButtonRow(
+								tgbotapi.NewKeyboardButton("Юриспруденция"),
+								tgbotapi.NewKeyboardButton("Другое"),
+							),
+						)
+					}
+				}
 				bot.Send(msg)
 				continue
 			}
@@ -538,11 +703,11 @@ func main() {
 			} else {
 				session.User.Respondent.University = update.Message.Text
 			}
-			msg := tgbotapi.NewMessage(userID, "Готовы сделать интервью?")
+			msg := tgbotapi.NewMessage(userID, "Все врено?")
 			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 				tgbotapi.NewKeyboardButtonRow(
-					tgbotapi.NewKeyboardButton("Готов к интервью"),
-					tgbotapi.NewKeyboardButton("Не готов"),
+					tgbotapi.NewKeyboardButton("Да, вывесить на доску заказов"),
+					tgbotapi.NewKeyboardButton("Редактировать"),
 				),
 			)
 			bot.Send(msg)
@@ -560,11 +725,11 @@ func main() {
 			} else {
 				session.User.Respondent.University = update.Message.Text
 			}
-			msg := tgbotapi.NewMessage(userID, "Готовы сделать интервью?")
+			msg := tgbotapi.NewMessage(userID, "Все врено?")
 			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 				tgbotapi.NewKeyboardButtonRow(
-					tgbotapi.NewKeyboardButton("Готов к интервью"),
-					tgbotapi.NewKeyboardButton("Не готов"),
+					tgbotapi.NewKeyboardButton("Да, вывесить на доску заказов"),
+					tgbotapi.NewKeyboardButton("Редактировать"),
 				),
 			)
 			bot.Send(msg)
@@ -572,18 +737,32 @@ func main() {
 		case SceneAskJob:
 			if update.Message.Text != "Бизнес" && update.Message.Text != "Медицина" && update.Message.Text != "Строительство" && update.Message.Text != "IT" && update.Message.Text != "Другое" {
 				msg := tgbotapi.NewMessage(userID, "Выберите корректную сферу")
-				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
-					tgbotapi.NewKeyboardButtonRow(
-						tgbotapi.NewKeyboardButton("Бизнес"),
-						tgbotapi.NewKeyboardButton("Медицина"),
-						tgbotapi.NewKeyboardButton("IT"),
-						
-					),
-					tgbotapi.NewKeyboardButtonRow(
-						tgbotapi.NewKeyboardButton("Строительство"),
-						tgbotapi.NewKeyboardButton("Другое"),
-					),
-				)
+				if session.User.IsCustomer == 1 {
+					msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Бизнес"),
+							tgbotapi.NewKeyboardButton("Медицина"),
+							tgbotapi.NewKeyboardButton("IT"),
+						),
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Строительство"),
+							tgbotapi.NewKeyboardButton("Другое"),
+							tgbotapi.NewKeyboardButton("Неважно"),
+						),
+					)
+				} else {
+					msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Бизнес"),
+							tgbotapi.NewKeyboardButton("Медицина"),
+							tgbotapi.NewKeyboardButton("IT"),
+						),
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Строительство"),
+							tgbotapi.NewKeyboardButton("Другое"),
+						),
+					)
+				}
 				bot.Send(msg)
 				continue
 			}
@@ -605,11 +784,11 @@ func main() {
 			} else {
 				session.User.Respondent.Job = update.Message.Text
 			}
-			msg := tgbotapi.NewMessage(userID, "Готовы сделать интервью?")
+			msg := tgbotapi.NewMessage(userID, "Все врено?")
 			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 				tgbotapi.NewKeyboardButtonRow(
-					tgbotapi.NewKeyboardButton("Готов к интервью"),
-					tgbotapi.NewKeyboardButton("Не готов"),
+					tgbotapi.NewKeyboardButton("Да, вывесить на доску заказов"),
+					tgbotapi.NewKeyboardButton("Редактировать"),
 				),
 			)
 			bot.Send(msg)
@@ -627,29 +806,47 @@ func main() {
 			} else {
 				session.User.Respondent.Job = update.Message.Text
 			}
-			msg := tgbotapi.NewMessage(userID, "Готовы сделать интервью?")
+			msg := tgbotapi.NewMessage(userID, "Все верно?")
 			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 				tgbotapi.NewKeyboardButtonRow(
-					tgbotapi.NewKeyboardButton("Готов к интервью"),
-					tgbotapi.NewKeyboardButton("Не готов"),
+					tgbotapi.NewKeyboardButton("Да, вывесить на доску заказов"),
+					tgbotapi.NewKeyboardButton("Редактировать"),
+				),
+			)
+			bot.Send(msg)
+			session.CurrentScene = SceneAskIsReady
+		case SceneAskDescription:
+			err = sql.UpdateCustomerByUserId(ctx, models.Customer{
+				UserId: userID,
+				Desc:   update.Message.Text,
+			})
+			if err != nil {
+				bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
+				continue
+			}
+			msg := tgbotapi.NewMessage(userID, "Все верно?")
+			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+				tgbotapi.NewKeyboardButtonRow(
+					tgbotapi.NewKeyboardButton("Да, вывесить на доску заказов"),
+					tgbotapi.NewKeyboardButton("Редактировать"),
 				),
 			)
 			bot.Send(msg)
 			session.CurrentScene = SceneAskIsReady
 		case SceneAskIsReady:
-			if update.Message.Text != "Готов к интервью" && update.Message.Text != "Не готов" {
-				msg := tgbotapi.NewMessage(userID, "Выберите корректный ответ")
+			if update.Message.Text != "Да, вывесить на доску заказов" && update.Message.Text != "Редактировать" {
+				msg := tgbotapi.NewMessage(userID, "Все верно?")
 				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 					tgbotapi.NewKeyboardButtonRow(
-						tgbotapi.NewKeyboardButton("Готов к интервью"),
-						tgbotapi.NewKeyboardButton("Не готов"),
+						tgbotapi.NewKeyboardButton("Да, вывесить на доску заказов"),
+						tgbotapi.NewKeyboardButton("Редактировать"),
 					),
 				)
 				bot.Send(msg)
 				continue
 			}
 			if session.User.IsCustomer == 1 {
-				if update.Message.Text == "Готов к интервью" {
+				if update.Message.Text == "Да, вывесить на доску заказов" {
 					session.User.Customer.Ready = true
 					err := sql.UpdateCustomerByUserId(ctx, session.User.Customer)
 					if err != nil {
@@ -658,7 +855,7 @@ func main() {
 					}
 				}
 			} else {
-				if update.Message.Text == "Готов к интервью" {
+				if update.Message.Text == "Да, вывесить на доску заказов" {
 					session.User.Respondent.Ready = true
 					err := sql.UpdateRespondentByUserId(ctx, session.User.Respondent)
 					if err != nil {
@@ -668,12 +865,12 @@ func main() {
 				}
 			}
 
-			if update.Message.Text == "Готов к интервью" {
+			if update.Message.Text == "Да, вывесить на доску заказов" {
 				msg := tgbotapi.NewMessage(userID, "Ожидайте новых заказов!")
 				bot.Send(msg)
 				continue
 			} else {
-				msg := tgbotapi.NewMessage(userID, "Как будете готовы, напишите мне /ready")
+				msg := tgbotapi.NewMessage(userID, "TODO")
 				bot.Send(msg)
 				continue
 			}

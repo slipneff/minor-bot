@@ -33,6 +33,16 @@ func (s *Storage) CreateCustomer(ctx context.Context, app *models.Customer) erro
 	return nil
 }
 
+func (s *Storage) GetCustomerByUserId(ctx context.Context, id int64) (*models.Customer, error) {
+	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
+	var customer models.Customer
+	err := tr.Where("user_id = ?", id).First(&customer).Error
+	if err != nil {
+		return nil, err
+	}
+	return &customer, nil
+}
+
 func (s *Storage) UpdateCustomerByUserId(ctx context.Context, app models.Customer) error {
 	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
 	err := tr.Model(&models.Customer{}).Where("id = ?", app.UserId).Updates(app).Error
@@ -159,6 +169,32 @@ func (s *Storage) DeleteInterviewByRespondentID(ctx context.Context, id int64) e
 	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
 	err := tr.Model(&models.Interview{}).Delete("respondent_id = ?", id).Error
 	if err != nil {
+		return err
+	}
+	return nil
+}
+func (s *Storage) GetBalanceUser(ctx context.Context, id int64) (int, error) {
+	var user models.User
+	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
+	err := tr.Model(&user).Where("id = ?", id).Select("balance").Find(&user).Error
+	if err != nil {
+		return 0, err
+	}
+	return user.Balance, nil
+}
+
+func (s *Storage) ResetAll(ctx context.Context, id int64) error {
+	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
+	err := tr.Model(&models.User{}).Delete("id = ?", id).Error
+	if err != nil {
+		return err
+	}
+	err = tr.Model(&models.Customer{}).Delete("id =?", id).Error
+	if err!= nil {
+		return err
+	}
+	err = tr.Model(&models.Respondent{}).Delete("id =?", id).Error
+	if err!= nil {
 		return err
 	}
 	return nil
