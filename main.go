@@ -40,6 +40,7 @@ const (
 	SceneAskTime
 	SceneMenu
 	SceneAskResults
+	SceneAskComment
 )
 
 type UserSession struct {
@@ -105,6 +106,20 @@ func main() {
 				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Ваш профиль:\n\n%s", s.ToString()))
 				msg.ParseMode = "markdown"
 				bot.Send(msg)
+			case "profile_respondent":
+				s, err := sql.GetRespondentById(ctx, update.CallbackQuery.Message.Chat.ID)
+				if err!= nil {
+					msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при получении профиля. Попробуйте позже.")
+					bot.Send(msg)
+					continue
+				}
+				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Ваш профиль:\n\n%s", s.ToString()))
+				msg.ParseMode = "markdown"
+				bot.Send(msg)
+			case "dashboard":
+				//TODO
+			case "my_respondents":
+				
 			}
 		}
 		if update.Message == nil { // ignore any non-Message Updates
@@ -593,8 +608,11 @@ func main() {
 				msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 				bot.Send(msg)
 				session.CurrentScene = SceneAskTime
+				continue
 			}
-			msg := tgbotapi.NewMessage(userID, "Готовы пройти интервью?")
+
+			msg := tgbotapi.NewMessage(userID, session.User.Customer.ToString()+"\n Готовы пройти интервью?")
+			msg.ParseMode = "markdown"
 			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 				tgbotapi.NewKeyboardButtonRow(
 					tgbotapi.NewKeyboardButton("Да, вывесить на доску заказов"),
@@ -647,8 +665,8 @@ func main() {
 				bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
 				continue
 			}
-			session.CurrentScene = SceneAskResults
-			msg := tgbotapi.NewMessage(userID, "Комментарий")
+			session.CurrentScene = SceneAskDescription
+			msg := tgbotapi.NewMessage(userID, "Ваш комментарий:")
 			bot.Send(msg)
 		case SceneAskUniversity:
 			if update.Message.Text != "Экономика" && update.Message.Text != "Психология" && update.Message.Text != "Маркетинг" && update.Message.Text != "Юриспруденция" && update.Message.Text != "Другое" {
@@ -703,7 +721,14 @@ func main() {
 			} else {
 				session.User.Respondent.University = update.Message.Text
 			}
-			msg := tgbotapi.NewMessage(userID, "Все врено?")
+			s := ""
+			if session.User.IsCustomer == 0 {
+				s = session.User.Customer.ToString()
+			} else {
+				s = session.User.Respondent.ToString()
+			}
+			msg := tgbotapi.NewMessage(userID, s+"\nВсе верно?")
+			msg.ParseMode = "markdown"
 			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 				tgbotapi.NewKeyboardButtonRow(
 					tgbotapi.NewKeyboardButton("Да, вывесить на доску заказов"),
@@ -725,7 +750,14 @@ func main() {
 			} else {
 				session.User.Respondent.University = update.Message.Text
 			}
-			msg := tgbotapi.NewMessage(userID, "Все врено?")
+			s := ""
+			if session.User.IsCustomer == 0 {
+				s = session.User.Customer.ToString()
+			} else {
+				s = session.User.Respondent.ToString()
+			}
+			msg := tgbotapi.NewMessage(userID, s+"\nВсе верно?")
+			msg.ParseMode = "markdown"
 			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 				tgbotapi.NewKeyboardButtonRow(
 					tgbotapi.NewKeyboardButton("Да, вывесить на доску заказов"),
@@ -784,7 +816,14 @@ func main() {
 			} else {
 				session.User.Respondent.Job = update.Message.Text
 			}
-			msg := tgbotapi.NewMessage(userID, "Все врено?")
+			s := ""
+			if session.User.IsCustomer == 0 {
+				s = session.User.Customer.ToString()
+			} else {
+				s = session.User.Respondent.ToString()
+			}
+			msg := tgbotapi.NewMessage(userID, s+"\nВсе верно?")
+			msg.ParseMode = "markdown"
 			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 				tgbotapi.NewKeyboardButtonRow(
 					tgbotapi.NewKeyboardButton("Да, вывесить на доску заказов"),
@@ -806,7 +845,14 @@ func main() {
 			} else {
 				session.User.Respondent.Job = update.Message.Text
 			}
-			msg := tgbotapi.NewMessage(userID, "Все верно?")
+			s := ""
+			if session.User.IsCustomer == 0 {
+				s = session.User.Customer.ToString()
+			} else {
+				s = session.User.Respondent.ToString()
+			}
+			msg := tgbotapi.NewMessage(userID, s+"\nВсе верно?")
+			msg.ParseMode = "markdown"
 			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 				tgbotapi.NewKeyboardButtonRow(
 					tgbotapi.NewKeyboardButton("Да, вывесить на доску заказов"),
@@ -824,7 +870,14 @@ func main() {
 				bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
 				continue
 			}
-			msg := tgbotapi.NewMessage(userID, "Все верно?")
+			s := ""
+			if session.User.IsCustomer == 0 {
+				s = session.User.Customer.ToString()
+			} else {
+				s = session.User.Respondent.ToString()
+			}
+			msg := tgbotapi.NewMessage(userID, s+"\nВсе верно?")
+			msg.ParseMode = "markdown"
 			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 				tgbotapi.NewKeyboardButtonRow(
 					tgbotapi.NewKeyboardButton("Да, вывесить на доску заказов"),
@@ -835,7 +888,14 @@ func main() {
 			session.CurrentScene = SceneAskIsReady
 		case SceneAskIsReady:
 			if update.Message.Text != "Да, вывесить на доску заказов" && update.Message.Text != "Редактировать" {
-				msg := tgbotapi.NewMessage(userID, "Все верно?")
+				s := ""
+				if session.User.IsCustomer == 0 {
+					s = session.User.Customer.ToString()
+				} else {
+					s = session.User.Respondent.ToString()
+				}
+				msg := tgbotapi.NewMessage(userID, s+"\nВсе верно?")
+				msg.ParseMode = "markdown"
 				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 					tgbotapi.NewKeyboardButtonRow(
 						tgbotapi.NewKeyboardButton("Да, вывесить на доску заказов"),
@@ -870,7 +930,8 @@ func main() {
 				bot.Send(msg)
 				continue
 			} else {
-				msg := tgbotapi.NewMessage(userID, "TODO")
+				session.CurrentScene = SceneAskName
+				msg := tgbotapi.NewMessage(userID, "Введите имя")
 				bot.Send(msg)
 				continue
 			}

@@ -27,8 +27,8 @@ type Respondent struct {
 }
 
 func (r *Respondent) ToString() string {
-	return fmt.Sprintf(" Имя: %s,\n Возраст: %s,\n Пол: %s,\n Местоположение: %s,\n Категория: %s,\n Университет: %s,\n Работа: %s,\n Готов к выполнению: %t",
-		r.Name, r.Age, r.Gender, r.Geo, r.Category, r.University, r.Job, r.Ready)
+	return fmt.Sprintf("*Имя*: %s,\n *Возраст*: %s,\n *Пол*: %s,\n *Местоположение*: %s,\n *Категория*: %s,\n *Университет*: %s,\n *Работа*: %s",
+		r.Name, r.Age, r.Gender, r.Geo, r.Category, r.University, r.Job)
 }
 
 type Customer struct {

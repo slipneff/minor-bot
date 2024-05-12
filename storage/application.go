@@ -190,12 +190,22 @@ func (s *Storage) ResetAll(ctx context.Context, id int64) error {
 		return err
 	}
 	err = tr.Model(&models.Customer{}).Delete("id =?", id).Error
-	if err!= nil {
+	if err != nil {
 		return err
 	}
 	err = tr.Model(&models.Respondent{}).Delete("id =?", id).Error
-	if err!= nil {
+	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func (s *Storage) GetRespondentsByCustomerId(ctx context.Context, id int64) ([]int64, error) {
+	var respondents []int64
+	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
+	err := tr.Model(&models.Interview{}).Where("customer_id = ? && approved_resp = true", id).Find(&respondents).Error
+	if err != nil {
+		return nil, err
+	}
+	return respondents, nil
 }
