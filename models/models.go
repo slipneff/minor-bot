@@ -27,6 +27,7 @@ type Respondent struct {
 }
 
 func (r *Respondent) ToString() string {
+	fmt.Println("RESPONDENT")
 	return fmt.Sprintf("*Имя*: %s,\n *Возраст*: %s,\n *Пол*: %s,\n *Местоположение*: %s,\n *Категория*: %s,\n *Университет*: %s,\n *Работа*: %s",
 		r.Name, r.Age, r.Gender, r.Geo, r.Category, r.University, r.Job)
 }
@@ -46,11 +47,13 @@ type Customer struct {
 	Results    string
 	Time       string `gorm:"default:'1 час'"`
 	Count      int
+	Available  int `gorm:"default:0"`
 }
 
 func (c *Customer) ToString() string {
+	fmt.Println("CUSTOMER")
 	return fmt.Sprintf("*Имя заявителя*: %s,\n*Средний возраст респондентов*: %s,\n*Количество респондентов*: %d,\n*Пол респондетов*: %s,\n*География респондента*: %s,\n*Категория респондента*: %s",
-		c.Name, c.Age, c.Count,c.Gender, c.Geo, c.Category)
+		c.Name, c.Age, c.Count, c.Gender, c.Geo, c.Category)
 }
 
 type Interview struct {

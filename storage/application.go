@@ -2,6 +2,7 @@ package sql
 
 import (
 	"context"
+	"errors"
 
 	"github.com/slipneff/minor-bot/models"
 	"gorm.io/gorm"
@@ -9,16 +10,22 @@ import (
 
 func (s *Storage) CreateUser(ctx context.Context, user *models.User) error {
 	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
-	err := tr.Create(user).Error
+	err := tr.Create(&user).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return nil
+		}
 		return err
 	}
 	return nil
 }
 func (s *Storage) CreateRespondent(ctx context.Context, app *models.Respondent) error {
 	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
-	err := tr.Create(app).Error
+	err := tr.Create(&app).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return nil
+		}
 		return err
 	}
 	return nil
@@ -26,8 +33,11 @@ func (s *Storage) CreateRespondent(ctx context.Context, app *models.Respondent) 
 
 func (s *Storage) CreateCustomer(ctx context.Context, app *models.Customer) error {
 	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
-	err := tr.Create(app).Error
+	err := tr.Create(&app).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return nil
+		}
 		return err
 	}
 	return nil
@@ -45,7 +55,7 @@ func (s *Storage) GetCustomerByUserId(ctx context.Context, id int64) (*models.Cu
 
 func (s *Storage) UpdateCustomerByUserId(ctx context.Context, app models.Customer) error {
 	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
-	err := tr.Model(&models.Customer{}).Where("id = ?", app.UserId).Updates(app).Error
+	err := tr.Model(&models.Customer{}).Where("user_id = ?", app.UserId).Updates(app).Error
 	if err != nil {
 		return err
 	}
@@ -64,7 +74,7 @@ func (s *Storage) UpdateRespondentByUserId(ctx context.Context, app models.Respo
 func (s *Storage) GetRespondentById(ctx context.Context, id int64) (*models.Respondent, error) {
 	var res *models.Respondent
 	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
-	err := tr.Model(res).Where("id = ?", id).Find(res).Error
+	err := tr.Model(&res).Where("id = ?", id).Find(&res).Error
 	if err != nil {
 		return nil, err
 	}
@@ -74,18 +84,27 @@ func (s *Storage) GetRespondentById(ctx context.Context, id int64) (*models.Resp
 func (s *Storage) FindRespondend(ctx context.Context, res models.Respondent) ([]models.Respondent, error) {
 	var out []models.Respondent
 	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
-	err := tr.Model(out).Where("age = ? AND gender = ? AND geo = ? AND category = ? and university = ? AND job = ? AND ready = true", res.Age,
-		res.Gender, res.Geo, res.Category, res.University, res.Job).Find(out).Error
+	err := tr.Model(&out).Where("age = ? AND gender = ? AND geo = ? AND category = ? and university = ? AND job = ? AND ready = true", res.Age,
+		res.Gender, res.Geo, res.Category, res.University, res.Job).Find(&out).Error
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (s *Storage) GetReadyCustomers(ctx context.Context) ([]models.Customer, error) {
-	var customers []models.Customer
+func (s *Storage) GetReadyRespondent(ctx context.Context, id int64) ([]*models.Respondent, error) {
+	var respondents []*models.Respondent
 	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
-	err := tr.Model(&customers).Where("ready = ?", true).Find(&customers).Error
+	err := tr.Model(&respondents).Where("ready = ? AND id > ?", true, id).Order("id asc").Limit(2).Find(&respondents).Error
+	if err != nil {
+		return nil, err
+	}
+	return respondents, nil
+}
+func (s *Storage) GetReadyCustomer(ctx context.Context, id int64) ([]*models.Customer, error) {
+	var customers []*models.Customer
+	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
+	err := tr.Model(&customers).Where("ready = ? AND user_id > ?", true, id).Order("id asc").Limit(2).Find(&customers).Error
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +208,7 @@ func (s *Storage) ResetAll(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	err = tr.Model(&models.Customer{}).Delete("id =?", id).Error
+	err = tr.Model(&models.Customer{}).Delete("user_id =?", id).Error
 	if err != nil {
 		return err
 	}
