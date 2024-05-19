@@ -40,7 +40,7 @@ func (r *Respondent) ToString() string {
 		str += fmt.Sprintf("*Категория*: %s,\n", r.Category)
 	}
 	if r.University!= "" {
-		str += fmt.Sprintf("*Университет*: %s,\n", r.University)
+		str += fmt.Sprintf("*Специализация*: %s,\n", r.University)
 	}
 	if r.Job!= "" {
 		str += fmt.Sprintf("*Работа*: %s,\n", r.Job)
