@@ -1,6 +1,10 @@
 package models
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/google/uuid"
+)
 
 type User struct {
 	Id           int64 `gorm:"column:id;primaryKey"`
@@ -27,14 +31,25 @@ type Respondent struct {
 }
 
 func (r *Respondent) ToString() string {
-	fmt.Println("RESPONDENT")
-	return fmt.Sprintf("*Имя*: %s,\n *Возраст*: %s,\n *Пол*: %s,\n *Местоположение*: %s,\n *Категория*: %s,\n *Университет*: %s,\n *Работа*: %s",
-		r.Name, r.Age, r.Gender, r.Geo, r.Category, r.University, r.Job)
+	str := ""
+	str += fmt.Sprintf("*Имя*: %s,\n", r.Name)
+	str += fmt.Sprintf("*Возраст*: %s,\n", r.Age)
+	str += fmt.Sprintf("*Пол*: %s,\n", r.Gender)
+	str += fmt.Sprintf("*Географическое местоположение*: %s,\n", r.Geo)
+	if r.Category!= "" {
+		str += fmt.Sprintf("*Категория*: %s,\n", r.Category)
+	}
+	if r.University!= "" {
+		str += fmt.Sprintf("*Университет*: %s,\n", r.University)
+	}
+	if r.Job!= "" {
+		str += fmt.Sprintf("*Работа*: %s,\n", r.Job)
+	}
+	return str
 }
 
 type Customer struct {
-	Id         int64 `gorm:"column:id;primaryKey;autoIncrement"`
-	UserId     int64
+	Id         int64 `gorm:"column:id;primaryKey"`
 	Name       string
 	Age        string
 	Gender     string
@@ -46,21 +61,44 @@ type Customer struct {
 	Desc       string
 	Results    string
 	Time       string `gorm:"default:'1 час'"`
+	Theme      string `gorm:"default:'Без темы'"`
 	Count      int
 	Available  int `gorm:"default:0"`
 }
 
 func (c *Customer) ToString() string {
-	fmt.Println("CUSTOMER")
-	return fmt.Sprintf("*Имя заявителя*: %s,\n*Средний возраст респондентов*: %s,\n*Количество респондентов*: %d,\n*Пол респондетов*: %s,\n*География респондента*: %s,\n*Категория респондента*: %s",
-		c.Name, c.Age, c.Count, c.Gender, c.Geo, c.Category)
+	str := "*Требования к респонденту*\n"
+	str += fmt.Sprintf("\n*Примерный возраст респондента*: %s,", c.Age)
+	str += fmt.Sprintf("\n*Пол*: %s,", c.Gender)
+	str += fmt.Sprintf("\n*Географическое местоположение*: %s,", c.Geo)
+	if c.Category != "" {
+		str += fmt.Sprintf("\n*Категория*: %s,", c.Category)
+	}
+	if c.University != "" {
+		str += fmt.Sprintf("\n*Специализация*: %s,", c.University)
+	}
+	if c.Job!= "" {
+		str += fmt.Sprintf("\n*Работа*: %s,", c.Job)
+	}
+	str += fmt.Sprintf("\n*Тема*: %s,", c.Theme)
+	str += fmt.Sprintf("\n*Длительность*: %s,", c.Time)
+	str += fmt.Sprintf("\n*Доступно*: %s,", fmt.Sprintf("%d/%d", c.Count-c.Available, c.Count))
+	str += fmt.Sprintf("\n*Интервьюер*: %s,\n*Готов поделиться результатом?*: %s", c.Name, c.Results)
+	str += fmt.Sprintf("\n*Комментарий*: %s,", c.Desc)
+	return str
+}
+func (c *Customer) ShortString() string {
+	return fmt.Sprintf("*Тема*: %s,\n*Длительность*: %s,\n*Доступно*: %s,\n*Интервьюер*: %s,\n*Готов поделиться результатом?*: %s,\n*Комментарий*: %s",
+		c.Theme, c.Time, fmt.Sprintf("%d/%d", c.Count-c.Available, c.Count), c.Name, c.Results, c.Desc)
+
 }
 
 type Interview struct {
-	CustomerId           int64 `gorm:"column:customer_id;primaryKey"`
-	ApplicationId        int64 `gorm:"column:application_id;primaryKey"`
-	RespondentId         int64 `gorm:"column:respondent_id;primaryKey"`
-	ApprovedByCustomer   bool  `gorm:"column:approved_cust;default:false"`
-	ApprovedByRespondent bool  `gorm:"column:approved_resp;default:false"`
-	Active               bool  `gorm:"column:active;default:true"`
+	CustomerId           int64     `gorm:"column:customer_id;primaryKey"`
+	ApplicationId        uuid.UUID `gorm:"column:application_id;primaryKey"`
+	RespondentId         int64     `gorm:"column:respondent_id;primaryKey"`
+	RespondentName       string    `gorm:"column:respondent_name"`
+	ApprovedByCustomer   bool      `gorm:"column:approved_cust;default:false"`
+	ApprovedByRespondent bool      `gorm:"column:approved_resp;default:false"`
+	Active               bool      `gorm:"column:active;default:true"`
 }

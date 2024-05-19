@@ -9,6 +9,7 @@ import (
 
 	trmgorm "github.com/avito-tech/go-transaction-manager/gorm"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/google/uuid"
 	"github.com/slipneff/minor-bot/config"
 	"github.com/slipneff/minor-bot/constants"
 	"github.com/slipneff/minor-bot/models"
@@ -41,15 +42,13 @@ const (
 	SceneMenu
 	SceneAskResults
 	SceneAskComment
+	SceneAskTheme
+	SceneAskIsJob
 )
 
 type UserSession struct {
 	CurrentScene Scene
 	User         models.User
-}
-type respondentForDashboard struct {
-	Id         int64
-	Respondent *models.Respondent
 }
 type customerForDashboard struct {
 	Id       int64
@@ -58,22 +57,63 @@ type customerForDashboard struct {
 
 var sessions map[int64]*UserSession
 
-func getCustomerForDashboard(ctx context.Context, sql *sql.Storage, userID int64) (*customerForDashboard, error) {
+func getNextCustomerForDashboard(ctx context.Context, sql *sql.Storage, userID int64) (*customerForDashboard, error) {
 	res := new(customerForDashboard)
-	resp, err := sql.GetReadyCustomer(ctx, userID)
+	resp, err := sql.GetNextReadyCustomer(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 	if len(resp) > 1 {
 		res.Id = resp[1].Id
+		res.Customer = resp[0]
 	} else if len(resp) > 0 {
 		res.Customer = resp[0]
 	} else {
-		return nil, fmt.Errorf("no customer found")
+		return nil, fmt.Errorf("no customers found")
 	}
 	return res, nil
 }
+func getPrevCustomerForDashboard(ctx context.Context, sql *sql.Storage, userID int64) (*customerForDashboard, error) {
+	res := new(customerForDashboard)
+	resp, err := sql.GetPrevReadyCustomer(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp) > 1 {
+		res.Id = resp[1].Id
+		res.Customer = resp[0]
+	} else if len(resp) > 0 {
+		res.Customer = resp[0]
+	} else {
+		return nil, fmt.Errorf("no customers found")
+	}
+	return res, nil
+}
+func responseRespondent(ctx context.Context, bot *tgbotapi.BotAPI, sql *sql.Storage, customer_id, respondent_id int64, username string) error {
+	err := sql.CreateInterview(ctx, &models.Interview{
+		CustomerId:           customer_id,
+		ApplicationId:        uuid.New(),
+		RespondentId:         respondent_id,
+		RespondentName:       username,
+		ApprovedByCustomer:   false,
+		ApprovedByRespondent: true,
+		Active:               true,
+	})
+	if err != nil {
+		return err
+	}
+	resp, err := sql.GetRespondentById(ctx, respondent_id)
+	if err != nil {
+		return err
+	}
+	msg := tgbotapi.NewMessage(customer_id, "@"+username+" откликнулся на ваш заказ:\n\n"+resp.ToString())
+	msg.ParseMode = "markdown"
+	bot.Send(msg)
+	msg = tgbotapi.NewMessage(respondent_id, "Ваш отклик отправлен")
+	bot.Send(msg)
 
+	return nil
+}
 func main() {
 	ctx := context.Background()
 	config := config.MustLoadConfig("config.yaml")
@@ -110,53 +150,117 @@ func main() {
 
 	for update := range updates {
 		if update.CallbackQuery != nil {
+			c := tgbotapi.NewDeleteMessage(update.CallbackQuery.Message.Chat.ID, update.CallbackQuery.Message.MessageID)
+			_, err := bot.Send(c)
+			if err != nil {
+				log.Println(err)
+			}
+			if strings.HasPrefix(update.CallbackQuery.Data, "next_customer_") {
+				id, err := strconv.ParseInt(strings.Split(update.CallbackQuery.Data, "customer_")[1], 10, 64)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				user, err := getNextCustomerForDashboard(ctx, sql, id)
+				if err != nil {
+					msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при получении профиля. Попробуйте позже.")
+					bot.Send(msg)
+					continue
+				}
+				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Доска заказов:\n\n%s", user.Customer.ShortString()))
+				msg.ParseMode = "markdown"
+				if user.Id != 0 {
+					msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+						tgbotapi.NewInlineKeyboardRow(
+							tgbotapi.NewInlineKeyboardButtonData("<--", fmt.Sprintf("prev_customer_%d", user.Id)),
+							tgbotapi.NewInlineKeyboardButtonData("Подробнее", fmt.Sprintf("full_%d", user.Customer.Id)),
+							tgbotapi.NewInlineKeyboardButtonData("-->", fmt.Sprintf("next_customer_%d", user.Id)),
+						),
+					)
+				} else {
+					msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+						tgbotapi.NewInlineKeyboardRow(
+							tgbotapi.NewInlineKeyboardButtonData("<--", fmt.Sprintf("prev_customer_%d", user.Customer.Id)),
+							tgbotapi.NewInlineKeyboardButtonData("Подробнее", fmt.Sprintf("full_%d", user.Customer.Id)),
+							tgbotapi.NewInlineKeyboardButtonData("-->", update.CallbackQuery.Data),
+						),
+					)
+				}
+				bot.Send(msg)
+			}
+			if strings.HasPrefix(update.CallbackQuery.Data, "prev_customer_") {
+				id, err := strconv.ParseInt(strings.Split(update.CallbackQuery.Data, "customer_")[1], 10, 64)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				user, err := getPrevCustomerForDashboard(ctx, sql, id)
+				if err != nil {
+					msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при получении профиля. Попробуйте позже.")
+					bot.Send(msg)
+					continue
+				}
+				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Доска заказов:\n\n%s", user.Customer.ShortString()))
+				msg.ParseMode = "markdown"
+				if user.Id != 0 {
+					msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+						tgbotapi.NewInlineKeyboardRow(
+							tgbotapi.NewInlineKeyboardButtonData("<--", fmt.Sprintf("prev_customer_%d", user.Id)),
+							tgbotapi.NewInlineKeyboardButtonData("Подробнее", fmt.Sprintf("full_%d", user.Customer.Id)),
+							tgbotapi.NewInlineKeyboardButtonData("-->", update.CallbackQuery.Data),
+						),
+					)
+				} else {
+					msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+						tgbotapi.NewInlineKeyboardRow(
+							tgbotapi.NewInlineKeyboardButtonData("<--", update.CallbackQuery.Data),
+							tgbotapi.NewInlineKeyboardButtonData("Подробнее", fmt.Sprintf("full_%d", user.Customer.Id)),
+							tgbotapi.NewInlineKeyboardButtonData("-->", fmt.Sprintf("next_customer_%d", user.Customer.Id)),
+						),
+					)
+				}
+				bot.Send(msg)
+			}
 			if strings.HasPrefix(update.CallbackQuery.Data, "full_") {
 				id, err := strconv.ParseInt(strings.Split(update.CallbackQuery.Data, "_")[1], 10, 64)
 				if err != nil {
 					log.Println(err)
 					continue
 				}
-				user, err := getCustomerForDashboard(ctx, sql, id)
+				user, err := sql.GetCustomerByUserId(ctx, id)
 				if err != nil {
 					msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при получении профиля. Попробуйте позже.")
 					bot.Send(msg)
 					continue
 				}
-				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Доска заказов:\n\n%s", user.Customer.ToString()))
+				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Доска заказов:\n\n%s", user.ToString()))
 				msg.ParseMode = "markdown"
-				if user.Id != 0 {
-					msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
-						tgbotapi.NewInlineKeyboardRow(
-							tgbotapi.NewInlineKeyboardButtonData("Подробнее", fmt.Sprintf("full_%d", user.Customer.Id)),
-							tgbotapi.NewInlineKeyboardButtonData("Следующий", fmt.Sprintf("customer_%d", user.Id)),
-						),
-					)
-				}
+				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+					tgbotapi.NewInlineKeyboardRow(
+						//id_customer | id_respondent
+						tgbotapi.NewInlineKeyboardButtonData("Откликнуться", fmt.Sprintf("respond_%d_%d", user.Id, update.CallbackQuery.Message.Chat.ID)),
+						tgbotapi.NewInlineKeyboardButtonData("Назад", "dashboard"),
+					),
+				)
 				bot.Send(msg)
 			}
-			if strings.HasPrefix(update.CallbackQuery.Data, "customer_") {
-				id, err := strconv.ParseInt(strings.Split(update.CallbackQuery.Data, "_")[1], 10, 64)
+			if strings.HasPrefix(update.CallbackQuery.Data, "respond_") {
+				customer_id, err := strconv.ParseInt(strings.Split(update.CallbackQuery.Data, "_")[1], 10, 64)
 				if err != nil {
 					log.Println(err)
 					continue
 				}
-				user, err := getCustomerForDashboard(ctx, sql, id)
+				respondent_id, err := strconv.ParseInt(strings.Split(update.CallbackQuery.Data, "_")[2], 10, 64)
 				if err != nil {
-					msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при получении профиля. Попробуйте позже.")
+					log.Println(err)
+					continue
+				}
+				err = responseRespondent(ctx, bot, sql, customer_id, respondent_id, update.CallbackQuery.Message.Chat.UserName)
+				if err != nil {
+					msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при отклике. Попробуйте позже.")
 					bot.Send(msg)
 					continue
 				}
-				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Доска заказов:\n\n%s", user.Customer.ToString()))
-				msg.ParseMode = "markdown"
-				if user.Id != 0 {
-					msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
-						tgbotapi.NewInlineKeyboardRow(
-							tgbotapi.NewInlineKeyboardButtonData("Подробнее", fmt.Sprintf("full_%d", user.Customer.Id)),
-							tgbotapi.NewInlineKeyboardButtonData("Следующий", fmt.Sprintf("customer_%d", user.Id)),
-						),
-					)
-				}
-				bot.Send(msg)
 			}
 			switch update.CallbackQuery.Data {
 			case "balance":
@@ -189,26 +293,47 @@ func main() {
 				msg.ParseMode = "markdown"
 				bot.Send(msg)
 			case "dashboard":
-				user, err := getCustomerForDashboard(ctx, sql, 0)
+				user, err := getNextCustomerForDashboard(ctx, sql, 0)
 				if err != nil {
+					fmt.Println(err)
 					msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при получении профиля. Попробуйте позже.")
 					bot.Send(msg)
 					continue
 				}
-				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Доска заказов:\n\n%s", user.Customer.ToString()))
+				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Доска заказов:\n\n%s", user.Customer.ShortString()))
 				msg.ParseMode = "markdown"
 				if user.Id != 0 {
 					msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 						tgbotapi.NewInlineKeyboardRow(
+							tgbotapi.NewInlineKeyboardButtonData("<--", update.CallbackQuery.Data),
 							tgbotapi.NewInlineKeyboardButtonData("Подробнее", fmt.Sprintf("full_%d", user.Customer.Id)),
-							tgbotapi.NewInlineKeyboardButtonData("Следующий", fmt.Sprintf("customer_%d", user.Id)),
+							tgbotapi.NewInlineKeyboardButtonData("-->", fmt.Sprintf("next_customer_%d", user.Customer.Id)),
+						),
+					)
+				} else {
+					msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+						tgbotapi.NewInlineKeyboardRow(
+							tgbotapi.NewInlineKeyboardButtonData("<--", update.CallbackQuery.Data),
+							tgbotapi.NewInlineKeyboardButtonData("Подробнее", fmt.Sprintf("full_%d", user.Customer.Id)),
+							tgbotapi.NewInlineKeyboardButtonData("-->", update.CallbackQuery.Data),
 						),
 					)
 				}
 				bot.Send(msg)
 
 			case "my_respondents":
-
+				respondents, err := sql.GetRespondentsByCustomerId(ctx, update.CallbackQuery.Message.Chat.ID)
+				if err != nil {
+					msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при получении профиля. Попробуйте позже.")
+					bot.Send(msg)
+					continue
+				}
+				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Ваши респонденты:\n")
+				for i, respondent := range respondents {
+					msg.Text += fmt.Sprintf("*%d.* @%s\n", i+1, respondent.RespondentName)
+				}
+				msg.ParseMode = "markdown"
+				bot.Send(msg)
 			}
 		}
 		if update.Message == nil { // ignore any non-Message Updates
@@ -427,15 +552,15 @@ func main() {
 				continue
 			}
 			err = sql.CreateCustomer(ctx, &models.Customer{
-				UserId: userID,
+				Id: userID,
 			})
 			if err != nil && err != gorm.ErrDuplicatedKey {
 				bot.Send(tgbotapi.NewMessage(userID, "Ошибка при создании заявки, попробуйте еще раз"))
 				continue
 			}
 			err = sql.UpdateCustomerByUserId(ctx, models.Customer{
-				UserId: userID,
-				Count:  count,
+				Id:    userID,
+				Count: count,
 			})
 			if err != nil {
 				bot.Send(tgbotapi.NewMessage(userID, "Ошибка при создании заявки, попробуйте еще раз"))
@@ -451,8 +576,8 @@ func main() {
 				message = "Введите возраст респондента"
 				session.User.Customer.Name = update.Message.Text
 				err = sql.UpdateCustomerByUserId(ctx, models.Customer{
-					UserId: userID,
-					Name:   update.Message.Text,
+					Id:   userID,
+					Name: update.Message.Text,
 				})
 				if err != nil {
 					log.Fatal(err)
@@ -483,14 +608,22 @@ func main() {
 		case SceneAskAge:
 			if session.User.IsCustomer == 1 {
 				err = sql.UpdateCustomerByUserId(ctx, models.Customer{
-					UserId: userID,
-					Age:    update.Message.Text,
+					Id:  userID,
+					Age: update.Message.Text,
 				})
 				if err != nil {
 					log.Fatal(err)
 					bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
 					continue
 				}
+				msg := tgbotapi.NewMessage(userID, "Отлично, теперь выберете пол респондента")
+				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+					tgbotapi.NewKeyboardButtonRow(
+						tgbotapi.NewKeyboardButton("Мужской"),
+						tgbotapi.NewKeyboardButton("Женский"),
+						tgbotapi.NewKeyboardButton("Неважно"),
+					),
+				)
 			} else {
 				session.User.Respondent.Age = update.Message.Text
 				err = sql.UpdateRespondentByUserId(ctx, models.Respondent{
@@ -502,19 +635,7 @@ func main() {
 					bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
 					continue
 				}
-			}
-			msg := tgbotapi.NewMessage(userID, "Отлично, теперь выберете пол")
-			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
-				tgbotapi.NewKeyboardButtonRow(
-					tgbotapi.NewKeyboardButton("Мужской"),
-					tgbotapi.NewKeyboardButton("Женский"),
-				),
-			)
-			bot.Send(msg)
-			session.CurrentScene = SceneAskGender
-		case SceneAskGender:
-			if update.Message.Text != "Мужской" && update.Message.Text != "Женский" {
-				msg := tgbotapi.NewMessage(userID, "Выберите корректный пол")
+				msg := tgbotapi.NewMessage(userID, "Отлично, теперь выберете ваш пол")
 				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 					tgbotapi.NewKeyboardButtonRow(
 						tgbotapi.NewKeyboardButton("Мужской"),
@@ -522,11 +643,34 @@ func main() {
 					),
 				)
 				bot.Send(msg)
-				continue
+			}
+
+			session.CurrentScene = SceneAskGender
+		case SceneAskGender:
+			if update.Message.Text != "Мужской" && update.Message.Text != "Женский" && update.Message.Text != "Неважно" {
+				msg := tgbotapi.NewMessage(userID, "Выберите корректный пол")
+				if session.User.IsCustomer == 1 {
+					msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Мужской"),
+							tgbotapi.NewKeyboardButton("Женский"),
+							tgbotapi.NewKeyboardButton("Неважно"),
+						),
+					)
+				} else {
+					msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Мужской"),
+							tgbotapi.NewKeyboardButton("Женский"),
+						),
+					)
+					bot.Send(msg)
+					continue
+				}
 			}
 			if session.User.IsCustomer == 1 {
 				err = sql.UpdateCustomerByUserId(ctx, models.Customer{
-					UserId: userID,
+					Id:     userID,
 					Gender: update.Message.Text,
 				})
 				if err != nil {
@@ -585,8 +729,8 @@ func main() {
 			}
 			if session.User.IsCustomer == 1 {
 				err = sql.UpdateCustomerByUserId(ctx, models.Customer{
-					UserId: userID,
-					Geo:    update.Message.Text,
+					Id:  userID,
+					Geo: update.Message.Text,
 				})
 				if err != nil {
 					log.Fatal(err)
@@ -621,8 +765,8 @@ func main() {
 		case SceneAskDifferentGeo:
 			if session.User.IsCustomer == 1 {
 				err = sql.UpdateCustomerByUserId(ctx, models.Customer{
-					UserId: userID,
-					Geo:    update.Message.Text,
+					Id:  userID,
+					Geo: update.Message.Text,
 				})
 				if err != nil {
 					log.Fatal(err)
@@ -672,7 +816,7 @@ func main() {
 			}
 			if session.User.IsCustomer == 1 {
 				err = sql.UpdateCustomerByUserId(ctx, models.Customer{
-					UserId:   userID,
+					Id:       userID,
 					Category: update.Message.Text,
 				})
 				if err != nil {
@@ -708,7 +852,7 @@ func main() {
 						),
 					)
 				} else {
-					if session.User.IsCustomer == 1 {
+					if session.User.IsCustomer == 0 {
 						msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 							tgbotapi.NewKeyboardButtonRow(
 								tgbotapi.NewKeyboardButton("Экономика"),
@@ -785,14 +929,44 @@ func main() {
 				continue
 			}
 			err = sql.UpdateCustomerByUserId(ctx, models.Customer{
-				UserId: userID,
-				Time:   update.Message.Text,
+				Id:   userID,
+				Time: update.Message.Text,
 			})
 			if err != nil {
 				log.Fatal(err)
-					bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
+				bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
 				continue
 			}
+			session.CurrentScene = SceneAskTheme
+			msg := tgbotapi.NewMessage(userID, "Тема интервью?")
+			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+				tgbotapi.NewKeyboardButtonRow(
+					tgbotapi.NewKeyboardButton("Пропустить"),
+				),
+			)
+			bot.Send(msg)
+		case SceneAskTheme:
+			if update.Message.Text == "" {
+				msg := tgbotapi.NewMessage(userID, "Тема интервью?")
+				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+					tgbotapi.NewKeyboardButtonRow(
+						tgbotapi.NewKeyboardButton("Пропустить"),
+					),
+				)
+				bot.Send(msg)
+			}
+			if update.Message.Text != "Пропустить" {
+				err = sql.UpdateCustomerByUserId(ctx, models.Customer{
+					Id:    userID,
+					Theme: update.Message.Text,
+				})
+				if err != nil {
+					log.Fatal(err)
+					bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
+					continue
+				}
+			}
+
 			session.CurrentScene = SceneAskResults
 			msg := tgbotapi.NewMessage(userID, "Готовы ли вы поделиться результатами своего исследования?")
 			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
@@ -802,6 +976,7 @@ func main() {
 				),
 			)
 			bot.Send(msg)
+
 		case SceneAskResults:
 			if update.Message.Text == "" || update.Message.Text != "Нет" && update.Message.Text != "Да" {
 				msg := tgbotapi.NewMessage(userID, "Готовы ли вы поделиться результатами своего исследования?")
@@ -815,16 +990,16 @@ func main() {
 				continue
 			}
 			err = sql.UpdateCustomerByUserId(ctx, models.Customer{
-				UserId:  userID,
+				Id:      userID,
 				Results: update.Message.Text,
 			})
 			if err != nil {
 				log.Fatal(err)
-					bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
+				bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
 				continue
 			}
 			session.CurrentScene = SceneAskDescription
-			msg := tgbotapi.NewMessage(userID, "Ваш комментарий:")
+			msg := tgbotapi.NewMessage(userID, "Комментарий(дополнительно):")
 			bot.Send(msg)
 		case SceneAskUniversity:
 			if update.Message.Text != "Экономика" && update.Message.Text != "Психология" && update.Message.Text != "Маркетинг" && update.Message.Text != "Юриспруденция" && update.Message.Text != "Другое" {
@@ -869,7 +1044,7 @@ func main() {
 
 			if session.User.IsCustomer == 1 {
 				err = sql.UpdateCustomerByUserId(ctx, models.Customer{
-					UserId:     userID,
+					Id:         userID,
 					University: update.Message.Text,
 				})
 				if err != nil {
@@ -888,9 +1063,20 @@ func main() {
 					bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
 					continue
 				}
+				msg := tgbotapi.NewMessage(userID, "\nВы работаете?")
+				msg.ParseMode = "markdown"
+				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+					tgbotapi.NewKeyboardButtonRow(
+						tgbotapi.NewKeyboardButton("Да"),
+						tgbotapi.NewKeyboardButton("Нет"),
+					),
+				)
+				bot.Send(msg)
+				session.CurrentScene = SceneAskIsJob
+				continue
 			}
 			s := ""
-			if session.User.IsCustomer == 1  {
+			if session.User.IsCustomer == 1 {
 				sa, err := sql.GetCustomerByUserId(ctx, userID)
 				if err != nil {
 					log.Fatal(err)
@@ -919,10 +1105,43 @@ func main() {
 			)
 			bot.Send(msg)
 			session.CurrentScene = SceneAskIsReady
+
+		case SceneAskIsJob:
+			if update.Message.Text != "Да" && update.Message.Text != "Нет" {
+				msg := tgbotapi.NewMessage(userID, "Вы работаете?")
+				msg.ParseMode = "markdown"
+				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+					tgbotapi.NewKeyboardButtonRow(
+						tgbotapi.NewKeyboardButton("Да"),
+						tgbotapi.NewKeyboardButton("Нет"),
+					),
+				)
+				bot.Send(msg)
+				continue
+			}
+			if update.Message.Text == "Да" {
+				msg := tgbotapi.NewMessage(userID, "В какой сфере вы работаете?")
+				msg.ParseMode = "markdown"
+				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+					tgbotapi.NewKeyboardButtonRow(
+						tgbotapi.NewKeyboardButton("Бизнес"),
+						tgbotapi.NewKeyboardButton("Медицина"),
+						tgbotapi.NewKeyboardButton("IT"),
+					),
+					tgbotapi.NewKeyboardButtonRow(
+						tgbotapi.NewKeyboardButton("Строительство"),
+						tgbotapi.NewKeyboardButton("Другое"),
+						tgbotapi.NewKeyboardButton("Неважно"),
+					),
+				)
+				bot.Send(msg)
+				session.CurrentScene = SceneAskJob
+			}
+
 		case SceneAskDifferentUniversity:
 			if session.User.IsCustomer == 1 {
 				err = sql.UpdateCustomerByUserId(ctx, models.Customer{
-					UserId:     userID,
+					Id:         userID,
 					University: update.Message.Text,
 				})
 				if err != nil {
@@ -943,7 +1162,7 @@ func main() {
 				}
 			}
 			s := ""
-			if session.User.IsCustomer == 1  {
+			if session.User.IsCustomer == 1 {
 				sa, err := sql.GetCustomerByUserId(ctx, userID)
 				if err != nil {
 					log.Fatal(err)
@@ -1012,8 +1231,8 @@ func main() {
 			}
 			if session.User.IsCustomer == 1 {
 				err = sql.UpdateCustomerByUserId(ctx, models.Customer{
-					UserId: userID,
-					Job:    update.Message.Text,
+					Id:  userID,
+					Job: update.Message.Text,
 				})
 				if err != nil {
 					log.Fatal(err)
@@ -1033,7 +1252,7 @@ func main() {
 				}
 			}
 			s := ""
-			if session.User.IsCustomer == 1  {
+			if session.User.IsCustomer == 1 {
 				sa, err := sql.GetCustomerByUserId(ctx, userID)
 				if err != nil {
 					log.Fatal(err)
@@ -1065,8 +1284,8 @@ func main() {
 		case SceneAskDifferentJob:
 			if session.User.IsCustomer == 1 {
 				err = sql.UpdateCustomerByUserId(ctx, models.Customer{
-					UserId: userID,
-					Job:    update.Message.Text,
+					Id:  userID,
+					Job: update.Message.Text,
 				})
 				if err != nil {
 					log.Fatal(err)
@@ -1086,7 +1305,7 @@ func main() {
 				}
 			}
 			s := ""
-			if session.User.IsCustomer == 1  {
+			if session.User.IsCustomer == 1 {
 				sa, err := sql.GetCustomerByUserId(ctx, userID)
 				if err != nil {
 					log.Fatal(err)
@@ -1117,16 +1336,16 @@ func main() {
 			session.CurrentScene = SceneAskIsReady
 		case SceneAskDescription:
 			err = sql.UpdateCustomerByUserId(ctx, models.Customer{
-				UserId: userID,
-				Desc:   update.Message.Text,
+				Id:   userID,
+				Desc: update.Message.Text,
 			})
 			if err != nil {
 				log.Fatal(err)
-					bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
+				bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
 				continue
 			}
 			s := ""
-			if session.User.IsCustomer == 1  {
+			if session.User.IsCustomer == 1 {
 				sa, err := sql.GetCustomerByUserId(ctx, userID)
 				if err != nil {
 					log.Fatal(err)
@@ -1177,20 +1396,20 @@ func main() {
 			if session.User.IsCustomer == 1 {
 				if update.Message.Text == "Да, вывесить на доску заказов" {
 					session.User.Customer.Ready = true
-					err := sql.UpdateCustomerByUserId(ctx, session.User.Customer)
+					err := sql.SetReadyCustomer(ctx, userID)
 					if err != nil {
 						log.Fatal(err)
-					bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
+						bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
 						continue
 					}
 				}
 			} else {
 				if update.Message.Text == "Да, вывесить на доску заказов" {
 					session.User.Respondent.Ready = true
-					err := sql.UpdateRespondentByUserId(ctx, session.User.Respondent)
+					err := sql.SetReadyRespondent(ctx, userID)
 					if err != nil {
 						log.Fatal(err)
-					bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
+						bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
 						continue
 					}
 				}
