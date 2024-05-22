@@ -279,7 +279,7 @@ func main() {
 					bot.Send(msg)
 					continue
 				}
-				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Ваш профиль:\n\n%s", s.ToString()))
+				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("%s", s.ToString()))
 				msg.ParseMode = "markdown"
 				bot.Send(msg)
 			case "profile_respondent":
