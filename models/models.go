@@ -32,10 +32,18 @@ type Respondent struct {
 
 func (r *Respondent) ToString() string {
 	str := ""
-	str += fmt.Sprintf("*Имя*: %s,\n", r.Name)
-	str += fmt.Sprintf("*Возраст*: %s,\n", r.Age)
-	str += fmt.Sprintf("*Пол*: %s,\n", r.Gender)
-	str += fmt.Sprintf("*Географическое местоположение*: %s,\n", r.Geo)
+	if r.Name!= "" {
+		str += fmt.Sprintf("Name: %s\n", r.Name)
+	}
+	if r.Age!= "" {
+		str += fmt.Sprintf("Age: %s\n", r.Age)
+	}
+	if r.Gender!= "" {
+		str += fmt.Sprintf("Gender: %s\n", r.Gender)
+	}
+	if r.Geo!= "" {
+		str += fmt.Sprintf("Geo: %s\n", r.Geo)
+	}
 	if r.Category!= "" {
 		str += fmt.Sprintf("*Категория*: %s,\n", r.Category)
 	}
@@ -44,6 +52,9 @@ func (r *Respondent) ToString() string {
 	}
 	if r.Job!= "" {
 		str += fmt.Sprintf("*Работа*: %s,\n", r.Job)
+	}
+	if str == "" {
+		str = "*Профиль еще не создан.*"
 	}
 	return str
 }
