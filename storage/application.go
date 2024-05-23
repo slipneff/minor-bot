@@ -124,7 +124,7 @@ func (s *Storage) FindRespondend(ctx context.Context, res models.Respondent) ([]
 func (s *Storage) GetReadyRespondent(ctx context.Context, id int64) ([]*models.Respondent, error) {
 	var respondents []*models.Respondent
 	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
-	err := tr.Model(&respondents).Where("ready = ? AND id > ?", true, id).Order("id asc").Limit(2).Find(&respondents).Error
+	err := tr.Model(&respondents).Order("id asc").Where("ready = ? AND id > ?", true, id).Limit(2).Find(&respondents).Error
 	if err != nil {
 		fmt.Println(err)
 		return nil, err
@@ -134,7 +134,7 @@ func (s *Storage) GetReadyRespondent(ctx context.Context, id int64) ([]*models.R
 func (s *Storage) GetNextReadyCustomer(ctx context.Context, id int64) ([]*models.Customer, error) {
 	var customers []*models.Customer
 	tr := s.getter.DefaultTrOrDB(ctx, s.db).WithContext(ctx)
-	err := tr.Model(&customers).Where("ready = ? AND id > ?", true, id).Order("id asc").Limit(2).Find(&customers).Error
+	err := tr.Model(&customers).Order("id asc").Where("ready = ? AND id > ?", true, id).Limit(2).Find(&customers).Error
 	if err != nil {
 		fmt.Println(err)
 		return nil, err

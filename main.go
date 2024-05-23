@@ -44,6 +44,7 @@ const (
 	SceneAskComment
 	SceneAskTheme
 	SceneAskIsJob
+	SceneHelp
 )
 
 type UserSession struct {
@@ -144,6 +145,10 @@ func main() {
 			Command:     "menu",
 			Description: "Главное меню",
 		},
+		tgbotapi.BotCommand{
+			Command:     "help",
+			Description: "Помощь",
+		},
 	)
 	bot.Send(cmdCfg)
 	sessions = make(map[int64]*UserSession)
@@ -172,9 +177,9 @@ func main() {
 				if user.Id != 0 {
 					msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 						tgbotapi.NewInlineKeyboardRow(
-							tgbotapi.NewInlineKeyboardButtonData("<--", fmt.Sprintf("prev_customer_%d", user.Id)),
+							tgbotapi.NewInlineKeyboardButtonData("<--", fmt.Sprintf("prev_customer_%d", user.Customer.Id)),
 							tgbotapi.NewInlineKeyboardButtonData("Подробнее", fmt.Sprintf("full_%d", user.Customer.Id)),
-							tgbotapi.NewInlineKeyboardButtonData("-->", fmt.Sprintf("next_customer_%d", user.Id)),
+							tgbotapi.NewInlineKeyboardButtonData("-->", fmt.Sprintf("next_customer_%d", user.Customer.Id)),
 						),
 					)
 				} else {
@@ -205,7 +210,7 @@ func main() {
 				if user.Id != 0 {
 					msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 						tgbotapi.NewInlineKeyboardRow(
-							tgbotapi.NewInlineKeyboardButtonData("<--", fmt.Sprintf("prev_customer_%d", user.Id)),
+							tgbotapi.NewInlineKeyboardButtonData("<--", update.CallbackQuery.Data),
 							tgbotapi.NewInlineKeyboardButtonData("Подробнее", fmt.Sprintf("full_%d", user.Customer.Id)),
 							tgbotapi.NewInlineKeyboardButtonData("-->", update.CallbackQuery.Data),
 						),
@@ -215,7 +220,7 @@ func main() {
 						tgbotapi.NewInlineKeyboardRow(
 							tgbotapi.NewInlineKeyboardButtonData("<--", update.CallbackQuery.Data),
 							tgbotapi.NewInlineKeyboardButtonData("Подробнее", fmt.Sprintf("full_%d", user.Customer.Id)),
-							tgbotapi.NewInlineKeyboardButtonData("-->", fmt.Sprintf("next_customer_%d", user.Customer.Id)),
+							tgbotapi.NewInlineKeyboardButtonData("-->", fmt.Sprintf("next_customer_%d", user.Id)),
 						),
 					)
 				}
@@ -362,8 +367,9 @@ func main() {
 				bot.Send(msg)
 				session.CurrentScene = SceneAskSide
 			case "help":
-				msg := tgbotapi.NewMessage(userID, constants.Hello)
+				msg := tgbotapi.NewMessage(userID, constants.Help)
 				bot.Send(msg)
+				session.CurrentScene = SceneHelp
 			case "restart":
 				sql.ResetAll(ctx, userID)
 				msg := tgbotapi.NewMessage(userID, "---Настройки сброшены---\n"+constants.Hello)
@@ -558,7 +564,7 @@ func main() {
 				bot.Send(msg)
 				continue
 			}
-			if balance < count {
+			if balance+1 < count {
 				msg := tgbotapi.NewMessage(userID, fmt.Sprintf("У вас недостаточно средств. Ваш баланс: %d\nВведите корректное число от 1 до %d", balance, balance))
 				bot.Send(msg)
 				continue
@@ -636,6 +642,7 @@ func main() {
 						tgbotapi.NewKeyboardButton("Неважно"),
 					),
 				)
+				bot.Send(msg)
 			} else {
 				session.User.Respondent.Age = update.Message.Text
 				err = sql.UpdateRespondentByUserId(ctx, models.Respondent{
@@ -1014,7 +1021,7 @@ func main() {
 			msg := tgbotapi.NewMessage(userID, "Комментарий(дополнительно):")
 			bot.Send(msg)
 		case SceneAskUniversity:
-			if update.Message.Text != "Экономика" && update.Message.Text != "Психология" && update.Message.Text != "Маркетинг" && update.Message.Text != "Юриспруденция" && update.Message.Text != "Другое" {
+			if update.Message.Text != "Экономика" && update.Message.Text != "Психология" && update.Message.Text != "Маркетинг" && update.Message.Text != "Юриспруденция" && update.Message.Text != "Другое" && update.Message.Text != "Неважно" {
 				msg := tgbotapi.NewMessage(userID, "Выберите корректный факультет")
 				if session.User.IsCustomer == 1 {
 					msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
@@ -1416,6 +1423,7 @@ func main() {
 					}
 					msg := tgbotapi.NewMessage(userID, "Ваше объявление выставлено на доску исследователя.\nВы можете редактировать свою заявку и просматривать откликнувшихся в личном кабинете и меню")
 					bot.Send(msg)
+					session.CurrentScene = SceneMenu
 					continue
 				}
 			} else {
@@ -1430,6 +1438,7 @@ func main() {
 					msg := tgbotapi.NewMessage(userID, "Отлично, теперь вы можете откликаться на заявки на доске исследователя.")
 					bot.Send(msg)
 					continue
+					session.CurrentScene = SceneMenu
 				}
 			}
 			if update.Message.Text == "Редактировать" {
