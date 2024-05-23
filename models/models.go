@@ -55,6 +55,8 @@ func (r *Respondent) ToString() string {
 	}
 	if str == "" {
 		str = "*Профиль еще не создан.*"
+	} else {
+		str += fmt.Sprintf("\n*Рейтинг*: %d", r.Rating)
 	}
 	return str
 }

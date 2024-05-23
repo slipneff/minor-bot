@@ -1414,6 +1414,9 @@ func main() {
 						bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
 						continue
 					}
+					msg := tgbotapi.NewMessage(userID, "Ваше объявление выставлено на доску исследователя.\nВы можете редактировать свою заявку и просматривать откликнувшихся в личном кабинете и меню")
+					bot.Send(msg)
+					continue
 				}
 			} else {
 				if update.Message.Text == "Да" {
@@ -1424,6 +1427,9 @@ func main() {
 						bot.Send(tgbotapi.NewMessage(userID, "Ошибка при обновлении данных, попробуйте еще раз"))
 						continue
 					}
+					msg := tgbotapi.NewMessage(userID, "Отлично, теперь вы можете откликаться на заявки на доске исследователя.")
+					bot.Send(msg)
+					continue
 				}
 			}
 			if update.Message.Text == "Редактировать" {
