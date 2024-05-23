@@ -118,7 +118,7 @@ func main() {
 	ctx := context.Background()
 	config := config.MustLoadConfig("config.yaml")
 	sql := sql.New(sql.MustNewSQLite(config), trmgorm.DefaultCtxGetter)
-	bot, err := tgbotapi.NewBotAPI("6547512514:AAHJpIeMLJZMHAnC608UKe16HQlLDjSqJDY")
+	bot, err := tgbotapi.NewBotAPI("7140951527:AAE7oL22kfawHhfyqhwelA2KZt9CVdYiu-4")
 	if err != nil {
 		log.Panic(err)
 	}
